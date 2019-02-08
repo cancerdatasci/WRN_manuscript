@@ -246,6 +246,19 @@ with(df %>% filter(CL %in% cur_CL),
   anova() %>% 
   broom::tidy()
 
+cur_CL <- c('HCT116-Ch3+5+sgCh2-2', 'HCT116-Ch3+5+sgMLH1-1')
+with(df %>% filter(CL %in% cur_CL),
+  lm(value ~ CL + guide)
+) %>% 
+  anova() %>% 
+  broom::tidy()
+
+cur_CL <- c('HCT116-Ch3+5+sgCh2-2', 'HCT116-Ch3+5+sgMLH1-2')
+with(df %>% filter(CL %in% cur_CL),
+  lm(value ~ CL + guide)
+) %>% 
+  anova() %>% 
+  broom::tidy()
 
 print('As 3-way ANOVA')
 lm(value ~ 0 + is_MLH1 + CL + guide, df) %>% 
@@ -286,6 +299,20 @@ with(df %>% filter(CL %in% cur_CL),
   broom::tidy()
 
 cur_CL <- c('HCT116-Ch2+sgCh2-2', 'HCT116-Ch3+5+sgMLH1-2')
+with(df %>% filter(CL %in% cur_CL),
+  lm(value ~ CL + guide)
+) %>% 
+  anova() %>% 
+  broom::tidy()
+
+cur_CL <- c('HCT116-Ch3+5+sgCh2-2', 'HCT116-Ch3+5+sgMLH1-1')
+with(df %>% filter(CL %in% cur_CL),
+  lm(value ~ CL + guide)
+) %>% 
+  anova() %>% 
+  broom::tidy()
+
+cur_CL <- c('HCT116-Ch3+5+sgCh2-2', 'HCT116-Ch3+5+sgMLH1-2')
 with(df %>% filter(CL %in% cur_CL),
   lm(value ~ CL + guide)
 ) %>% 
