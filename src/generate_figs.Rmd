@@ -1,0 +1,744 @@
+---
+title: "WRN Figures draft"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+    html_document:
+        toc: true
+        toc_float: true
+        theme: spacelab
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(plyr)
+library(magrittr) 
+library(tidyverse)
+library(reshape2)
+library(taigr)
+library(ggrepel)
+library(matrixStats)
+library(cowplot)
+
+source('~/CPDS/WRN_manuscript/src/WRN_helpers.R')
+
+fig_dir <- '~/CPDS/WRN_manuscript/figures'
+
+#PARAMETERS 
+q_thresh <- 0.1
+methyl_thresh <- Inf #threshold on methylation (Inf ignores methylation)
+CN_loss_thresh <- -1 #threshold on log2 relative CN values for calling deletions
+GE_unexpressed_thresh <- 1 #threshold on log2TPM values for calling unexpressed genes
+avg_WRN_dep_thresh <- -0.5 #dependency threshold (on the avg of CRISPR and RNAi dep scores)
+RPPA_thresh <- -1 #threshold for defining protein loss from RPPA
+
+save_as <- 'pdf'
+
+common_MSI_lineages <- c('gastric', 'colorectal', 'endometrium', 'ovary')
+MMR_genes <- c('MLH1', 'MSH2', 'MSH6', 'PMS2')
+RECQ_helicases <- c('WRN', 'RECQL', 'BLM', 'RECQL4', 'RECQL5')
+
+```
+
+
+# Load omics data and sample_info
+
+```{r, include = FALSE}
+dat <- load_omics_data()
+
+comb_data <- read_csv('~/CPDS/WRN_manuscript/data/WRN_final_cell_line_table.csv')
+comb_data %<>% mutate(MSI = ifelse(CCLE_MSI == 'indeterminate', NA, CCLE_MSI),
+                      MSI = MSI == 'MSI',
+                      CCLE_MSI = factor(CCLE_MSI, levels = c('MSS', 'indeterminate', 'MSI')))
+```
+
+# Get MSI/MSS Differential Dependency Stats
+
+```{r, include = FALSE}
+with(comb_data %>% filter(!is.na(avg_WRN_dep)),
+     table(MSI))
+with(comb_data %>% filter(!is.na(CRISPR_WRN_CERES)),
+     table(MSI))
+with(comb_data %>% filter(!is.na(DRIVE_WRN_D2)),
+     table(MSI))
+with(comb_data %>% filter(!is.na(CRISPR_WRN_CERES)),
+     table(GDSC_MSI))
+with(comb_data %>% filter(!is.na(DRIVE_WRN_D2)),
+     table(GDSC_MSI))
+
+#compute MSI CL dependency enrichment
+vec <- comb_data$MSI %>% set_names(comb_data$CCLE_ID)
+mat <- dat$DRIVE
+u_CLs <- intersect(rownames(mat), names(vec))
+DRIVE_res <- run_lm_stats_limma(mat[u_CLs,], vec[u_CLs], covars = NULL, weights = NULL, target_type = 'Gene')
+
+mat <- dat$CRISPR
+u_CLs <- intersect(rownames(mat), names(vec))
+CRISPR_res <- run_lm_stats_limma(mat[u_CLs,], vec[u_CLs], covars = NULL, weights = NULL, target_type = 'Gene')
+
+#now recompute with Sanger MSI calls
+vec <- (comb_data$GDSC_MSI == 'MSI-H') %>% set_names(comb_data$CCLE_ID)
+mat <- dat$DRIVE
+u_CLs <- intersect(rownames(mat), names(vec))
+DRIVE_res_sanger <- run_lm_stats_limma(mat[u_CLs,], vec[u_CLs], covars = NULL, weights = NULL, target_type = 'Gene')
+
+mat <- dat$CRISPR
+u_CLs <- intersect(rownames(mat), names(vec))
+CRISPR_res_sanger <- run_lm_stats_limma(mat[u_CLs,], vec[u_CLs], covars = NULL, weights = NULL, target_type = 'Gene')
+```
+
+```{r}
+#define categories relevant for biomarker analysis
+comb_data %<>% 
+  mutate(btype = ifelse(MSI, 'MSI_uncommon_lin', 'MSS'),
+         btype = ifelse(MSI & common_MSI_lineage, 'MSI_common_lin', btype),
+         rtype = btype,
+         rtype = ifelse(MSI & common_MSI_lineage & TP53_status == 'TP53_proficient', 'MSI_common_lin_P53WT', rtype),
+         rtype = factor(rtype, levels = c('MSS', 'MSI_uncommon_lin', 'MSI_common_lin', 'MSI_common_lin_P53WT')),
+         btype = factor(btype, levels = c('MSS', 'MSI_uncommon_lin', 'MSI_common_lin')))
+```
+
+# Classifying MSI lines
+
+```{r, fig.height = 7, fig.width = 7}
+#MSI stats
+with(comb_data, print(table(CCLE_MSI)))
+with(comb_data, print(table(CCLE_MSI, GDSC_MSI)))
+print('Number with dep data')
+with(comb_data %>% filter(!is.na(avg_WRN_dep)), print(table(CCLE_MSI)))
+
+ggplot(comb_data %>% filter(!is.na(MMR_loss), !is.na(frac_deletions_in_ms_regions), CCLE_MSI %in% c('MSS', 'MSI')), 
+       aes(frac_deletions_in_ms_regions, ms_deletions_normed, fill = MMR_loss_gene, size = CCLE_MSI)) +
+    geom_point(alpha = 0.75, shape = 21, color = 'black', stroke = 0.1) +
+    scale_y_log10(breaks = c(2500, 5000, 10000, 20000, 40000)) +
+    scale_size_discrete(range = c(0.75,1.5)) +
+    xlab('Fraction dels in MS regions') +
+    ylab('MS deletions') +
+    theme_Publication(14) +
+    guides(fill = guide_legend(title = ''),
+           size = guide_legend(title = '')) +
+    scale_fill_Publication() 
+save_fig(fig_dir, 'MSI_MMR_loss_by_gene_scatter', width = 4, height = 4, save_as)
+
+ggplot(comb_data %>% filter(!is.na(GDSC_MSI), !is.na(ms_deletions_normed), CCLE_MSI %in% c('MSS', 'MSI')),
+       aes(frac_deletions_in_ms_regions, ms_deletions_normed, fill = GDSC_MSI, size = CCLE_MSI)) +
+    geom_point(alpha = 0.75, shape = 21, color = 'black', stroke = 0.1) +
+    scale_y_log10(breaks = c(2500, 5000, 10000, 20000, 40000)) +
+    scale_size_discrete(range = c(0.75,1.5)) +
+    xlab('Fraction dels in MS regions') +
+    ylab('MS deletions') +
+    guides(fill = guide_legend(title = 'Sanger calls', nrow = 2),
+           size = guide_legend(title = 'Our calls', nrow=2)) +
+    theme_Publication(14) +
+    scale_fill_manual(values = col_MSI_labs)
+save_fig(fig_dir, 'MSI_sanger_scatter', width = 4, height = 4, save_as)
+
+```
+
+# WRN is the top preferential dependency for MSI lines
+
+```{r}
+#Using CCLE MSI annotations
+make_volcano(DRIVE_res) +
+    ggtitle('DRIVE RNAi') 
+save_fig(fig_dir, 'DRIVE_MSI_volcano', width = 4, height = 4, save_as)
+
+make_volcano(CRISPR_res) + 
+  ggtitle('CRISPR')
+save_fig(fig_dir, 'CRISPR_MSI_volcano', width = 4, height = 4, save_as)
+
+
+#Using Sanger MSI annotations
+make_volcano(DRIVE_res_sanger) +
+  ggtitle('DRIVE RNAi')
+save_fig(fig_dir, 'DRIVE_sangerMSI_volcano', width = 4, height = 4, save_as)
+
+make_volcano(CRISPR_res_sanger) +
+  ggtitle('CRISPR')
+save_fig(fig_dir, 'CRISPR_sangerMSI_volcano', width = 4, height = 4, save_as)
+
+```
+
+
+# WRN-MSI relationship consistent across MSI-prone lineages
+
+```{r, fig.width = 11, fig.height=8}
+with(comb_data, print(table(CCLE_MSI, common_MSI_lineage)))
+print('Only cell lines with some WRN dep data')
+with(comb_data %>% filter(!is.na(avg_WRN_dep)), print(table(CCLE_MSI, common_MSI_lineage)))
+print('Uncommon MSI lines')
+with(comb_data %>% filter(MSI, !common_MSI_lineage), table(Disease))
+print('Uncommon MSI lines with WRN dep data')
+with(comb_data %>% filter(MSI, !common_MSI_lineage, !is.na(avg_WRN_dep)), table(Disease))
+
+lin_ord <- c(
+  'endometrium',
+  'gastric',
+  'colorectal', 
+  'ovary',
+  '',
+  'esophagus', 
+  'liver',
+  'cervix',
+  'breast',
+  'central_nervous_system',
+  'peripheral_nervous_system',
+  'upper_aerodigestive',
+  'lung',
+  'kidney',
+  'rhabdoid',
+  'pancreas',
+  'urinary_tract',
+  'skin',
+  'thyroid',
+  'bone',
+  'soft_tissue',
+  'rhabdomyosarcoma',
+  'mesothelioma'
+)
+lin_ord <- c(lin_ord, setdiff(unique(comb_data %>% filter(!is.na(avg_WRN_dep)) %>% .[['Disease']] %>% unique()), lin_ord))
+
+#MAKE PLOT OF WRN DEP BY LINEAGE USING DRIVE DATA
+df <- comb_data %>% 
+  mutate(Disease = factor(Disease, levels = lin_ord)) %>% dplyr::select(Disease, CCLE_MSI, DRIVE_WRN_D2) %>%
+  rbind.fill(data.frame(CCLE_ID = NA, Disease = '', CCLE_MSI = 'MSS'))
+ggplot(df %>% filter(!is.na(Disease), CCLE_MSI %in% c('MSS', 'MSI')), 
+       aes(Disease, DRIVE_WRN_D2, color = CCLE_MSI, fill = CCLE_MSI)) + 
+    geom_boxplot(alpha = 0.25, outlier.shape = NA) +
+    ggbeeswarm::geom_quasirandom(aes(group = CCLE_MSI), dodge.width = 0.75, alpha =0.5, size = 1, varwidth = T) +
+  ylab('DRIVE WRN dependency') +
+    theme_Publication(14) +
+    theme(axis.title.x = element_blank()) +
+    guides(color = guide_legend(title = element_blank()), fill = FALSE) +
+    scale_colour_manual(values = col_MSI_labs) +
+    scale_fill_manual(values = col_MSI_labs) +
+    theme(axis.text.x=element_text(angle=90,hjust=1)) 
+save_fig(fig_dir, 'DRIVE_by_lineage', width = 6, height = 6, save_as)
+
+#MAKE PLOT OF WRN DEP BY LINEAGE USING CRISPR DATA
+df <- comb_data %>% 
+  mutate(Disease = factor(Disease, levels = lin_ord)) %>% dplyr::select(Disease, CCLE_MSI, CRISPR_WRN_CERES) %>% 
+  rbind.fill(data.frame(CCLE_ID = NA, Disease = '', CCLE_MSI = 'MSS'))
+ggplot(df %>% filter(!is.na(Disease), CCLE_MSI %in% c('MSS', 'MSI')), 
+       aes(Disease, CRISPR_WRN_CERES, color = CCLE_MSI, fill = CCLE_MSI)) + 
+    geom_boxplot(alpha = 0.25, outlier.shape = NA) +
+    ylab('CRISPR WRN dependency') +
+    ggbeeswarm::geom_quasirandom(aes(group = CCLE_MSI), dodge.width = 0.75, alpha =0.5, size = 1, varwidth = T) +
+    theme_Publication(14) +
+    theme(axis.title.x = element_blank()) +
+    guides(color = guide_legend(title = element_blank()), fill = FALSE) +
+    scale_color_manual(values = col_MSI_labs) +
+    scale_fill_manual(values = col_MSI_labs) +
+    theme(axis.text.x=element_text(angle=90,hjust=1)) 
+save_fig(fig_dir, 'CRISPR_by_lineage', width = 6, height = 6, save_as)
+
+
+df <- comb_data %>% 
+  mutate(Disease = factor(Disease, levels = lin_ord)) %>% dplyr::select(Disease, CCLE_MSI, avg_WRN_dep) %>% 
+  rbind.fill(data.frame(CCLE_ID = NA, Disease = '', CCLE_MSI = 'MSS'))
+ggplot(df %>% filter(!is.na(Disease), CCLE_MSI %in% c('MSS', 'MSI')), 
+       aes(Disease, avg_WRN_dep, color = CCLE_MSI, fill = CCLE_MSI)) + 
+    geom_boxplot(alpha = 0.25, outlier.size = 1) +
+    ggbeeswarm::geom_quasirandom(aes(group = CCLE_MSI), dodge.width = 0.75, alpha =0.5, size = 1, varwidth = T) +
+    theme_Publication(14) +
+    guides(color = guide_legend(title = element_blank()), fill = FALSE) +
+    ylab('Average WRN dependency') +
+    scale_color_manual(values = col_MSI_labs) +
+    scale_fill_manual(values = col_MSI_labs) +
+    theme(axis.text.x=element_text(angle=90,hjust=1)) 
+save_fig(fig_dir, 'avgWRN_by_lineage', width = 6, height = 6, save_as)
+
+#Compare WRN avg dep between MSI and MSS (all lins)
+with(comb_data %>% filter(!is.na(avg_WRN_dep)), print_unpaired_two_group_stats(avg_WRN_dep[MSI], avg_WRN_dep[!MSI])
+)
+
+#Compare WRN avg dep between MSI and MSS (common lins only)
+with(comb_data %>% filter(!is.na(avg_WRN_dep), common_MSI_lineage), print_unpaired_two_group_stats(avg_WRN_dep[MSI], avg_WRN_dep[!MSI])
+)
+```
+
+
+
+# WRN dependency stronger for high-INDEL MSI lines
+
+```{r}
+#color by common MSI lineages
+comb_data %<>% mutate(lin = ifelse(common_MSI_lineage, Disease, 'other'))
+#color by common MSI lineages within MSI
+ggplot(comb_data %>% filter(!is.na(lin), !is.na(ms_deletions_normed), MSI), 
+       aes(ms_deletions_normed, avg_WRN_dep)) + 
+    geom_point(aes(fill = lin), 
+               alpha = 0.75, 
+               size = 2,
+               shape = 21,
+               stroke = 0.3,
+               color = 'black') +
+    scale_x_log10(breaks = c(2500, 5000, 10000, 20000, 40000)) +
+    xlab('MS deletions') +
+    ylab('Average WRN dependency') +
+    theme_Publication(14) +
+    guides(fill = guide_legend(title = '',  nrow = 2)) +
+    scale_fill_manual(values = c(other = 'black', 
+                                  gastric = 'red',
+                                  colorectal = '#7fc97f',
+                                  endometrium = '#386cb0',
+                                  ovary = '#fdb462')) +
+    guides(size = guide_legend(title = ''))
+save_fig(fig_dir, 'WRNdep_vs_deletions_by_lineage_MSI', width = 4, height = 4, save_as)
+
+#restrict to common-MSI lineages
+ggplot(comb_data %>% filter(common_MSI_lineage, !is.na(ms_deletions_normed), MSI), 
+       aes(ms_deletions_normed, avg_WRN_dep)) + 
+    geom_point(aes(fill = lin), 
+               alpha = 0.75, 
+               size = 2,
+               shape = 21,
+               stroke = 0.3,
+               color = 'black') +
+    scale_x_log10(breaks = c(2500, 5000, 10000, 20000, 40000)) +
+    xlab('MS deletions') +
+    ylab('Average WRN dependency') +
+    theme_Publication(14) +
+    guides(fill = guide_legend(title = '',  nrow = 2)) +
+    scale_fill_manual(values = c(other = 'black', 
+                                  gastric = 'red',
+                                  colorectal = '#7fc97f',
+                                  endometrium = '#386cb0',
+                                  ovary = '#fdb462')) +
+    guides(size = guide_legend(title = ''))
+save_fig(fig_dir, 'WRNdep_vs_deletions_by_lineage_MSI_common_lineages', width = 4, height = 4, save_as)
+
+
+comb_data %>% 
+  filter(!is.na(btype)) %>% 
+  ggplot(aes(btype, ms_deletions_normed)) + 
+  geom_violin() +
+  ggbeeswarm::geom_beeswarm(data = comb_data %>% filter(btype %in% c('MSI_uncommon_lin', 'MSI_common_lin')), cex = 1.5, alpha = 0.75) +
+  theme_Publication(14) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title.x = element_blank()) +
+  ylab('MS deletions') 
+save_fig(fig_dir, 'del_density_by_group', width = 4, height = 4, save_as)
+
+
+print('Spearman corr between WRN dep and MSI deletion density, using only MSI lines')
+with(comb_data %>% filter(MSI), print_spearman_corr(ms_deletions_normed, avg_WRN_dep))
+
+#correlation between MSI deletion density and WRN dep within common MSI lines
+print('Spearman corr between WRN dep and MSI deletion density, using only MSI lines and only common MSI lineages')
+with(comb_data %>% filter(common_MSI_lineage, MSI),
+     print_spearman_corr(ms_deletions_normed, avg_WRN_dep))
+
+#correlation between MSI deletion density and WRN dep within common MSI lines, even after removing the one ovary outlier
+print('Same as above but also removing the outlier ovary line mentioned by the reviewer')
+outlier_CL <- comb_data %>% filter(common_MSI_lineage, MSI) %>% 
+  arrange(ms_deletions_normed) %>% 
+  head(1) %>% 
+  .[['CCLE_ID']]
+with(comb_data %>% filter(common_MSI_lineage, MSI, CCLE_ID != outlier_CL),
+     print_spearman_corr(ms_deletions_normed, avg_WRN_dep))
+
+#correlation between MSI deletion density and WRN dep within uncommon MSI lines
+print('Correlation between deletion density and WRN dep within MSI lines that are uncommon MSI lineages')
+with(comb_data %>% filter(!common_MSI_lineage, MSI),
+     print_spearman_corr(ms_deletions_normed, avg_WRN_dep))
+
+
+print('wilcoxon test whether WRN dependency is greater in MSI common-lin vs MSI uncommon lin cell lines')
+with(comb_data %>% filter(MSI, !is.na(lin)),
+     print_unpaired_two_group_stats(avg_WRN_dep[common_MSI_lineage], avg_WRN_dep[!common_MSI_lineage]))
+
+print('wilcoxon test whether msi deletion density is greater in MSI common-lin vs MSI uncommon lin cell lines')
+with(comb_data %>% filter(MSI, !is.na(lin)),
+     print_unpaired_two_group_stats(ms_deletions_normed[common_MSI_lineage], ms_deletions_normed[!common_MSI_lineage]))
+```
+
+# Relationship to TP53 status
+
+```{r}
+df <- comb_data %>% 
+        mutate(TP53_MSI = ifelse(!MSI, 'MSS', paste0('MSI_', TP53_status)),
+               MSI_lin = ifelse(common_MSI_lineage, 'MSI_common_lineage', 'MSI_uncommon_lineage'),
+              MSI_lin = ifelse(!MSI, 'MSS', MSI_lin),
+              MSI_lin = factor(MSI_lin, levels = c('MSS', 'MSI_uncommon_lineage', 'MSI_common_lineage')))
+ggplot(df %>% filter(!is.na(TP53_status), !is.na(MSI_lin)), 
+       aes(MSI_lin, avg_WRN_dep, fill = TP53_MSI)) + 
+    geom_boxplot(alpha = 0.5, outlier.shape = NA) +
+    ggbeeswarm::geom_quasirandom(aes(group = TP53_MSI), dodge.width = 0.75, alpha =0.5, size = 1, varwidth = T) +
+    theme_Publication() +
+    ylab('WRN dependency') +
+    scale_fill_manual(values = c(MSI_TP53_null = "#386cb0",
+                                      MSI_TP53_proficient = "#fdb462",
+                                      MSS = 'gray')) +
+    scale_color_manual(values = c(MSI_TP53_null = "#386cb0",
+                                      MSI_TP53_proficient = "#fdb462",
+                                      MSS = 'gray')) +
+  guides(fill = guide_legend(title = element_blank()),
+         color = guide_legend(title = element_blank())) +
+    theme(axis.title.x = element_blank(),
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = 'right',
+          legend.direction = 'vertical',
+          legend.key.height = unit(2, 'cm')
+)
+save_fig(fig_dir, 'WRNdep_MSI_TP53_status_MSIlineage_MSS', width = 5, height = 5, save_as)
+
+with(df %>% filter(!is.na(TP53_status), !is.na(MSI_lin), !is.na(avg_WRN_dep)),
+                   table(TP53_MSI, MSI_lin)
+)
+
+print('Wilcox test of whether WRN dep is greater in TP53 WT compared to Null cell lines')
+with(df, print_unpaired_two_group_stats(avg_WRN_dep[TP53_status == 'TP53_proficient'], avg_WRN_dep[TP53_status == 'TP53_null']))
+print('Same using only MSI lines')
+with(df %>% filter(MSI), print_unpaired_two_group_stats(avg_WRN_dep[TP53_status == 'TP53_proficient'], avg_WRN_dep[TP53_status == 'TP53_null']))
+print('Same using only MSI lines within common MSI lineages')
+with(df %>% filter(MSI, common_MSI_lineage), print_unpaired_two_group_stats(avg_WRN_dep[TP53_status == 'TP53_proficient'], avg_WRN_dep[TP53_status == 'TP53_null']))
+
+```
+
+
+# Analysis of biomarker predictions for WRN dependency
+
+MSI = MSI but not one of the common MSI lineages
+MSI_lin = MSI and common MSI lineage, but TP53 Null
+
+```{r}
+ggplot(comb_data %>% filter(!is.na(rtype)), aes(rtype, avg_WRN_dep)) + 
+  geom_violin() +
+  ggbeeswarm::geom_beeswarm(alpha = 0.5, size = 1.5, cex = 0.5) +
+  geom_hline(yintercept = avg_WRN_dep_thresh, linetype = 'dashed') +
+  cdsr::theme_Publication() +
+  theme(axis.text.x = element_text(angle = 70, hjust = 1),
+        axis.title.x = element_blank()) +
+  ylab('Average WRN dependency') 
+save_fig(fig_dir, 'WRN_dep_by_group', width = 4, height = 4, save_as)
+
+ggplot(comb_data %>% filter(!is.na(btype)), aes(btype, avg_WRN_dep)) + 
+  geom_violin() +
+  ggbeeswarm::geom_beeswarm(alpha = 0.5, size = 1.5, cex = 0.5) +
+  geom_hline(yintercept = avg_WRN_dep_thresh, linetype = 'dashed') +
+  cdsr::theme_Publication() +
+  theme(axis.text.x = element_text(angle = 70, hjust = 1),
+        axis.title.x = element_blank()) +
+  ylab('Average WRN dependency') 
+save_fig(fig_dir, 'WRN_dep_by_group_noP53', width = 4, height = 4, save_as)
+
+```
+
+The separation of sensitive and insensitive lines based on MSI status, lineage and P53 status is better than gold standard cases like KRAS and BRAF
+
+```{r, fig.width=5, fig.height = 5}
+targ_gene <- 'KRAS'
+bmarker <- data.frame(CCLE_ID = rownames(dat$MUT_HOT),
+                      bmark = dat$MUT_HOT[, 'KRAS'] > 0)
+KRAS_bmark_res <- make_biomarker_plot(targ_gene, bmarker,
+                                      bmark_name = 'KRAS_mut',
+                                      use_RNAi = TRUE,
+                                      dep_thresh = avg_WRN_dep_thresh)
+KRAS_bmark_res$plot
+save_fig(fig_dir, 'KRAS_dep_pred', width = 4, height = 4, save_as)
+
+
+targ_gene <- 'BRAF'
+bmarker <- data.frame(CCLE_ID = rownames(dat$MUT_HOT),
+                      bmark = dat$MUT_HOT[, 'BRAF'] > 0) 
+BRAF_bmark_res <- make_biomarker_plot(targ_gene, bmarker,
+                                      bmark_name = 'BRAF_mut',
+                                      use_RNAi = TRUE,
+                                      dep_thresh = avg_WRN_dep_thresh)
+BRAF_bmark_res$plot
+save_fig(fig_dir, 'BRAF_dep_pred', width = 4, height = 4, save_as)
+
+
+targ_gene <- 'MDM2'
+bmarker <- data.frame(CCLE_ID = rownames(dat$MUT_HOT),
+                      HOT_MUT = dat$MUT_HOT[, 'TP53'] > 0) %>% 
+  full_join(data.frame(CCLE_ID = rownames(dat$MUT_DAM),
+                       DAM_MUT = dat$MUT_DAM[, 'TP53'] > 0)) %>% 
+  full_join(data.frame(CCLE_ID = rownames(dat$MUT_OTHER),
+                       OTHER_MUT = dat$MUT_OTHER[, 'TP53'] > 0)) %>% 
+  mutate(bmark = !(HOT_MUT | DAM_MUT |  OTHER_MUT)) #call WT
+MDM2_bmark_res <- make_biomarker_plot(targ_gene, bmarker,
+                                      bmark_name = 'TP53_WT',
+                                      use_RNAi = TRUE,
+                                      dep_thresh = avg_WRN_dep_thresh)
+
+targ_gene <- 'PIK3CA'
+bmarker <- data.frame(CCLE_ID = rownames(dat$MUT_HOT),
+                      bmark = dat$MUT_HOT[, 'PIK3CA'] > 0)
+PIK3CA_bmark_res <- make_biomarker_plot(targ_gene, bmarker,
+                                      bmark_name = 'PIK3CA_mut',
+                                      use_RNAi = TRUE,
+                                      dep_thresh = avg_WRN_dep_thresh)
+PIK3CA_bmark_res$plot
+save_fig(fig_dir, 'PIK3CA_dep_pred', width = 4, height = 4, save_as)
+
+targ_gene <- 'ERBB2'
+bmarker <- data.frame(CCLE_ID = rownames(dat$CN),
+                      bmark = dat$CN[, 'ERBB2'] > 2) #HER 2 amplification threshold 
+ERBB2_bmark_res <- make_biomarker_plot(targ_gene, bmarker,
+                                      bmark_name = 'HER2_amp',
+                                      use_RNAi = TRUE,
+                                      dep_thresh = avg_WRN_dep_thresh)
+
+targ_gene <- 'NRAS'
+bmarker <- data.frame(CCLE_ID = rownames(dat$MUT_HOT),
+                      bmark = dat$MUT_HOT[, 'NRAS'] > 0)
+NRAS_bmark_res <- make_biomarker_plot(targ_gene, bmarker,
+                                      bmark_name = 'NRAS_mut',
+                                      use_RNAi = TRUE,
+                                      dep_thresh = avg_WRN_dep_thresh)
+
+
+targ_gene <- 'CTNNB1'
+bmarker <- data.frame(CCLE_ID = rownames(dat$MUT_DAM),
+                      bmark = dat$MUT_DAM[, 'APC'] > 0)
+APC_bmark_res <- make_biomarker_plot(targ_gene, bmarker,
+                                      bmark_name = 'APC_mut',
+                                      use_RNAi = TRUE,
+                                      dep_thresh = avg_WRN_dep_thresh)
+save_fig(fig_dir, 'CTNNB1_dep_pred', width = 4, height = 4, save_as)
+
+```
+
+```{r}
+targ_gene <- 'WRN'
+
+bmarker <- comb_data %>% 
+  mutate(bmark = MSI & common_MSI_lineage,
+         bmark = ifelse(common_MSI_lineage, bmark, NA))
+WRN_bmark_MSIlin <- make_biomarker_plot(targ_gene, bmarker,
+                                      bmark_name = 'MSI_common_lin',
+                                      use_RNAi = TRUE,
+                                      dep_thresh = avg_WRN_dep_thresh)
+WRN_bmark_MSIlin$plot
+save_fig(fig_dir, 'WRN_common_lin_bmark', width = 4, height = 4, save_as)
+
+bmarker <- comb_data %>% 
+  mutate(bmark = MSI)
+WRN_bmark_MSI <- make_biomarker_plot(targ_gene, bmarker,
+                                      bmark_name = 'MSI',
+                                      use_RNAi = TRUE,
+                                      dep_thresh = avg_WRN_dep_thresh)
+WRN_bmark_MSI$plot
+save_fig(fig_dir, 'WRN_MSI_bmark', width = 4, height = 4, save_as)
+
+```
+
+```{r}
+#make plots comparing PPV and sensitivity across biomarker/dep relationships
+all_ppvs <- ldply(list(WRN_bmark_MSIlin, WRN_bmark_MSI, 
+                       KRAS_bmark_res, BRAF_bmark_res, MDM2_bmark_res,
+                       PIK3CA_bmark_res, ERBB2_bmark_res, NRAS_bmark_res, APC_bmark_res), function(df) {data.frame(df$res)}) %>% 
+  mutate(type = paste0(targ_gene, '/', bmark)) %>% 
+  mutate(is_WRN = targ_gene == 'WRN')
+
+ord <- all_ppvs %>% 
+  arrange(desc(is_WRN), desc(ppv)) %>% 
+  .[['type']]
+all_ppvs %<>% mutate(type = factor(type, levels = ord))
+ggplot(all_ppvs, aes(type, ppv, fill = is_WRN)) + 
+  geom_bar(stat = 'identity') + 
+  coord_cartesian(ylim = c(0, 1)) +
+  guides(fill = F) +
+  cdsr::theme_Publication() + 
+  cdsr::scale_fill_Publication() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title.x = element_blank()) +
+  ylab('Biomarker positive\npredictive value (PPV)') 
+save_fig(fig_dir, 'PPV_comparison', width = 4, height = 4, save_as)
+
+ggplot(all_ppvs, aes(ppv, sensitivity, color = is_WRN)) + 
+  geom_point(size = 3, alpha = 0.75) + 
+  geom_text_repel(aes(label = type), size = 2.5) +
+  xlab('Precision (PPV)') + 
+  ylab('Recall (Sensitivity)') + 
+  guides(color = F)+
+  cdsr::theme_Publication() + 
+  cdsr::scale_color_Publication()  +
+  coord_cartesian(ylim = c(0, 1), xlim = c(0,1))
+save_fig(fig_dir, 'Sens_Spec_Scatter', width = 4, height = 4, save_as)
+
+```
+
+
+
+# Check synthetic lethality
+```{r}
+#helper function to compute gene loss
+cell_line_set <- comb_data %>% 
+  filter(!is.na(avg_WRN_dep), CCLE_ID %in% unique(dat$MUT$CCLE_ID),
+         CCLE_ID %in% rownames(dat$GE), CCLE_ID %in% rownames(dat$CN)) %>% 
+  .[['CCLE_ID']]
+
+get_gene_loss <- function(cur_gene) {
+  is_lost <- rep(FALSE, length(cell_line_set)) %>% set_names(cell_line_set)
+  
+  if (cur_gene %in% colnames(dat$MUT_DAM)) {
+  u <- intersect(cell_line_set, rownames(dat$MUT_DAM))
+  is_lost[u[dat$MUT_DAM[u, cur_gene] == TRUE & !is.na(dat$MUT_DAM[u, cur_gene])]] <- TRUE
+  }
+  
+  if (cur_gene %in% colnames(dat$METHYL)) {
+    u <- intersect(cell_line_set, rownames(dat$METHYL))
+  is_lost[u[dat$METHYL[u, cur_gene] > methyl_thresh & !is.na(dat$METHYL[u, cur_gene])]] <- TRUE
+  }
+  
+  if (cur_gene %in% colnames(dat$CN)) {
+  u <- intersect(cell_line_set, rownames(dat$CN))
+  is_lost[u[dat$CN[u, cur_gene] < CN_loss_thresh & !is.na(dat$CN[u, cur_gene])]] <- TRUE
+  }
+  
+  if (cur_gene %in% colnames(dat$GE)) {
+    u <- intersect(cell_line_set, rownames(dat$GE))
+  is_lost[u[dat$GE[u, cur_gene] < GE_unexpressed_thresh & !is.na(dat$GE[u, cur_gene])]] <- TRUE
+  }
+  
+  is_lost <- is_lost[cell_line_set]
+  return(is_lost)
+}
+
+
+INDEL_DAM_MUTs <- dat$MUT %>% 
+  dplyr::filter(Variant_Type %in% c('INS', 'DEL'), isDeleterious) %>% group_by(Tumor_Sample_Barcode, Hugo_Symbol) %>% 
+  summarise(n_muts = n()) %>% 
+  mutate(is_mut = n_muts > 0) %>% 
+  acast(Tumor_Sample_Barcode ~ Hugo_Symbol, value.var = 'is_mut', fill = 0)
+
+get_indel_frac <- function(cur_gene, CL_set) {
+   if (cur_gene %in% colnames(INDEL_DAM_MUTs)) {
+      u <- intersect(CL_set, rownames(INDEL_DAM_MUTs))
+      return(mean(INDEL_DAM_MUTs[u, cur_gene]))
+   } else {
+    return(0)
+  }
+}
+```
+
+```{r}
+#compute WRN-dependency association with loss of each DNA helicase gene
+min_loss <- 5 #minimum number of cell lines with gene loss to include in analysis
+targ_genes <- intersect(colnames(dat$GE), colnames(dat$MUT_DAM))
+doMC::registerDoMC(cores = 4)
+res <- ldply(targ_genes, function(cur_gene) {
+  cur_loss <- get_gene_loss(cur_gene)
+  if (sum(cur_loss, na.rm=T) < min_loss) {
+    return(NULL)
+  }
+  indel_frac <- get_indel_frac(cur_gene, cur_loss[cur_loss] %>% names)
+  df <- comb_data %>% 
+    left_join(data.frame(CCLE_ID = names(cur_loss), 
+                         gene_loss = cur_loss), by = "CCLE_ID")
+  
+  lm(avg_WRN_dep ~ MSI + gene_loss, data = df) %>%
+    broom::tidy() %>% 
+    mutate(n_loss = sum(df$gene_loss & !is.na(df$avg_WRN_dep), na.rm=T),
+           loss_gene = cur_gene,
+           indel_frac = indel_frac)
+}, .parallel = T) %>% filter(term != '(Intercept)')
+
+#add original MSI-WRN association
+res %<>% rbind(
+  lm(avg_WRN_dep ~ MSI, data = comb_data) %>%
+    broom::tidy() %>% 
+    mutate(n_loss = NA, 
+           loss_gene = 'baseline',
+           indel_frac = NA)
+)
+
+res_MSI <- res %>% filter(term == 'MSITRUE') #linear model weight of MSI status, controlling for gene loss
+to_plot <- res_MSI %>% filter(loss_gene != 'baseline') 
+
+ggplot(to_plot %>% filter(!is.na(indel_frac)), 
+       aes(estimate, -log10(p.value))) + 
+  geom_point(size = 0.5, aes(color = indel_frac > 0.5)) + 
+  geom_text_repel(data = to_plot %>% 
+                    arrange(desc(p.value)) %>% 
+                    head(10),
+                  aes(label = loss_gene), size = 3) +
+  geom_hline(yintercept = res_MSI %>% filter(loss_gene == 'baseline') %>% .[['p.value']] %>% -log10(.),
+             linetype = 'dashed') +
+  geom_vline(xintercept = res_MSI %>% filter(loss_gene == 'baseline') %>% .[['estimate']],
+             linetype = 'dashed') +
+  ylim(-2, NA) +
+  xlim(NA, 0.05) +
+  xlab('MSI/MSS WRN\ndep diff') +
+  cdsr::theme_Publication() +
+  scale_color_manual(values = c(`FALSE` = 'black', `TRUE` = 'red')) +
+  annotate('text', x = 0, y = 0, label= 'No MSI/WRN\nassociation', size = 2.5) +
+  guides(color = guide_legend(title = 'INDEL-driven'))
+save_fig(fig_dir, 'MSI_WRN_control_gene_loss_indel_frac', width = 4, height = 4, save_as)
+
+```
+
+
+#Compare MSI with dependency of other RECQ helicase
+```{r}
+CRISPR_df <- dat$CRISPR[,RECQ_helicases[RECQ_helicases %in% colnames(dat$CRISPR)]] %>% melt() %>% 
+  set_colnames(c('CCLE_ID', 'Gene', 'Dep')) %>% 
+  mutate(dataset = 'CRISPR')
+
+DRIVE_df <- dat$DRIVE[,RECQ_helicases[RECQ_helicases %in% colnames(dat$DRIVE)]] %>% melt() %>% 
+  set_colnames(c('CCLE_ID', 'Gene', 'Dep')) %>% 
+  mutate(dataset = 'DRIVE')
+
+comb <- rbind(CRISPR_df, DRIVE_df) %>% 
+  left_join(comb_data %>% dplyr::select(CCLE_ID, MSI))
+
+ggplot(comb %>% filter(!is.na(MSI)), 
+       aes(MSI, Dep, fill = MSI)) + 
+  geom_boxplot(alpha = 0.25, outlier.shape = NA) +
+  ggbeeswarm::geom_beeswarm(size = 0.5, alpha = 0.75) +
+  ylab('RecQ helicase dependency score') + 
+  theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+  geom_hline(yintercept = 0, linetype = 'dashed') +
+  facet_grid(dataset ~ Gene, scales = 'free_y') +
+  guides(fill = FALSE) +
+  scale_fill_manual(values = c(`TRUE` = 'red', `FALSE` = 'blue'))
+save_fig(fig_dir, 'other_helicase_MSI', width = 10, height = 6, save_as)
+
+res_tab <- ddply(comb, .(Gene, dataset), function(df) {
+  cstat <- with(df, wilcox.test(Dep[MSI], Dep[!MSI]))
+  n_MSS = with(df %>% filter(!is.na(MSI)),sum(!MSI))
+  n_MSI = with(df %>% filter(!is.na(MSI)), sum(MSI))
+  data.frame(p.value = cstat$p.value, n_MSS = n_MSS, n_MSI = n_MSI)
+}) %>% 
+  mutate(q.value = p.adjust(p.value, method = 'BH')) 
+knitr::kable(res_tab)
+```
+
+
+# POLE mutant lines
+
+```{r}
+to_plot <- comb_data %>% 
+ mutate(POLE_mutant = 'WT',
+         POLE_mutant = ifelse(POLE_other_mut, 'other', POLE_mutant),
+         POLE_mutant = ifelse(POLE_hotspot_mut, 'hotspot-missense', POLE_mutant),
+         POLE_mutant = ifelse(POLE_damaging_mut, 'damaging', POLE_mutant))
+
+to_plot %>% 
+  filter(!is.na(MSI)) %>% 
+  ggplot(aes(btype, avg_WRN_dep)) +
+  geom_boxplot(aes(fill = factor(POLE_mutant)), outlier.shape = NA) + 
+  ggbeeswarm::geom_quasirandom(aes(group = POLE_mutant), dodge.width = 0.75, alpha =0.5, size = 1, varwidth = T) +
+  guides(fill = guide_legend(title = 'POLE status')) +
+  ylab('Avg WRN dependency score') +
+  theme_Publication() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 70, hjust = 1)) 
+save_fig(fig_dir, 'WRNdep_POLE_status_CCLE_full', width = 4, height = 4, save_as)
+
+to_plot %>% filter(!is.na(MSI), !is.na(avg_WRN_dep)) %>% 
+  with(table(btype, POLE_mutant))
+
+with(to_plot %>% filter(!MSI, !is.na(avg_WRN_dep)),
+  wilcox.test(avg_WRN_dep[POLE_mutant == 'WT'], avg_WRN_dep[POLE_mutant != 'WT']))
+
+with(to_plot %>% filter(!MSI, !is.na(avg_WRN_dep)),
+  table(POLE_mutant))
+```
+
+
+

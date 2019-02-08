@@ -1,0 +1,304 @@
+---
+title: "WRN Stats"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: spacelab
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, include = FALSE}
+library(magrittr)
+library(plyr)
+library(tidyverse)
+library(reshape2)
+
+data_file <- '~/CPDS/WRN_manuscript/data/NatureDataSpreadsheet_190218_reformattedforstats.xlsx'
+```
+
+# Sheet 1 (Fig 2b)
+
+Using Two way ANOVA separately for each cell line 
+
+```{r}
+ df <- readxl::read_xlsx('~/CPDS/WRN_manuscript/data/NatureDataSpreadsheet_190218_reformattedforstats.xlsx',
+                        sheet = 1) %>% 
+  reshape2::melt(variable.name = 'CL_guide') %>% 
+  tidyr::separate(CL_guide, into = c('CL', 'guide'), sep = ' ') %>% 
+  mutate(is_WRN = factor(grepl('WRN', guide)))
+print(table(df$CL, df$guide))
+
+ddply(df, .(CL), function(cur_df) {
+  lm(value ~ is_WRN + guide, cur_df) %>% 
+    anova() %>% 
+    broom::tidy() 
+}) %>% filter(term == 'is_WRN') 
+
+ggplot(df, aes(guide, value, group = guide)) + ggbeeswarm::geom_beeswarm() +
+  geom_violin() + 
+  facet_wrap(~CL)+
+  theme(axis.text.x = element_text(angle = 80, hjust = 1))
+```
+
+# Sheet 2 (Fig 2d)
+
+Using Two way ANOVA separately for each cell line 
+
+```{r}
+ df <- readxl::read_xlsx('~/CPDS/WRN_manuscript/data/NatureDataSpreadsheet_190218_reformattedforstats.xlsx',
+                        sheet = 2) %>% 
+  reshape2::melt(variable.name = 'CL_guide') %>% 
+  tidyr::separate(CL_guide, into = c('CL', 'guide'), sep = ' ') %>% 
+  mutate(is_WRN = factor(grepl('WRN', guide)))
+print(table(df$CL, df$guide))
+
+ddply(df, .(CL), function(cur_df) {
+  lm(value ~ is_WRN + guide, cur_df) %>% 
+    anova() %>% 
+    broom::tidy() 
+}) %>% filter(term == 'is_WRN') 
+
+ggplot(df, aes(guide, value, group = guide)) + ggbeeswarm::geom_beeswarm() +
+  geom_violin() + 
+  facet_wrap(~CL)+
+  theme(axis.text.x = element_text(angle = 80, hjust = 1))
+```
+
+# Sheet 3 (Fig 3a)
+
+Using Two way ANOVA separately for each cell line 
+
+```{r}
+ df <- readxl::read_xlsx('~/CPDS/WRN_manuscript/data/NatureDataSpreadsheet_190218_reformattedforstats.xlsx',
+                        sheet = 3) %>% 
+  reshape2::melt(variable.name = 'CL_guide') %>% 
+  tidyr::separate(CL_guide, into = c('CL', 'guide'), sep = ' ') %>% 
+  mutate(is_WRN = factor(grepl('WRN', guide)))
+print(table(df$CL, df$guide))
+
+ddply(df, .(CL), function(cur_df) {
+  lm(value ~ is_WRN + guide, cur_df) %>% 
+    anova() %>% 
+    broom::tidy() 
+}) %>% filter(term == 'is_WRN') 
+
+ggplot(df, aes(guide, value, group = guide)) + ggbeeswarm::geom_beeswarm() +
+  geom_violin() + 
+  facet_wrap(~CL)+
+  theme(axis.text.x = element_text(angle = 80, hjust = 1))
+```
+
+# Sheet 4 (Fig 3b)
+
+Using Two way ANOVA separately for each cell line 
+
+```{r}
+ df <- readxl::read_xlsx('~/CPDS/WRN_manuscript/data/NatureDataSpreadsheet_190218_reformattedforstats.xlsx',
+                        sheet = 4) %>% 
+  reshape2::melt(variable.name = 'CL_guide') %>% 
+  tidyr::separate(CL_guide, into = c('CL', 'guide'), sep = ' ') %>% 
+  mutate(is_WRN = factor(grepl('WRN', guide)))
+print(table(df$CL, df$guide))
+
+ddply(df, .(CL), function(cur_df) {
+  lm(value ~ is_WRN + guide, cur_df) %>% 
+    anova() %>% 
+    broom::tidy() 
+}) %>% filter(term == 'is_WRN') 
+
+ggplot(df, aes(guide, value, group = guide)) + ggbeeswarm::geom_beeswarm() +
+  geom_violin() + 
+  facet_wrap(~CL)+
+  theme(axis.text.x = element_text(angle = 80, hjust = 1))
+```
+
+# Sheet 5 (Fig 4j)
+
+Using Two way ANOVA separately for each cell line 
+
+```{r}
+ df <- readxl::read_xlsx('~/CPDS/WRN_manuscript/data/NatureDataSpreadsheet_190218_reformattedforstats.xlsx',
+                        sheet = 5) %>% 
+  reshape2::melt(variable.name = 'CL_guide') %>% 
+  tidyr::separate(CL_guide, into = c('CL', 'guide'), sep = ' ') %>% 
+  mutate(is_WRN = factor(grepl('WRN', guide)))
+print(table(df$CL, df$guide))
+
+ddply(df, .(CL), function(cur_df) {
+  lm(value ~ is_WRN + guide, cur_df) %>% 
+    anova() %>% 
+    broom::tidy() 
+}) %>% filter(term == 'is_WRN') 
+
+ggplot(df, aes(guide, value, group = guide)) + ggbeeswarm::geom_beeswarm() +
+  geom_violin() + 
+  facet_wrap(~CL)+
+  theme(axis.text.x = element_text(angle = 80, hjust = 1))
+```
+
+
+# Sheet 6 (Fig ED 3b)
+
+Two-sample t-test for comparing shRFP vs shPSMD2
+
+Two-way ANOVA for comparing shRFP to shWRN
+
+```{r}
+ df <- readxl::read_xlsx('~/CPDS/WRN_manuscript/data/NatureDataSpreadsheet_190218_reformattedforstats.xlsx',
+                        sheet = 6) %>% 
+  reshape2::melt(variable.name = 'CL_guide') %>% 
+  tidyr::separate(CL_guide, into = c('day', 'CL', 'guide'), sep = ' ') %>% 
+  mutate(is_WRN = (grepl('WRN', guide)),
+         is_PSMD2 = (grepl('PSMD2', guide)))
+print(table(df$CL, df$guide, df$day))
+
+print('compare shRFP vs shPSMD2')
+ddply(df, .(CL, day), function(cur_df) {
+    with(cur_df %>% filter(!is_WRN), t.test(value[is_PSMD2], value[!is_PSMD2])) %>% 
+    broom::tidy() 
+}) 
+
+print('compare shRFP vs shWRN')
+ddply(df, .(CL, day), function(cur_df) {
+  lm(value ~ is_WRN + guide, cur_df %>% filter(!is_PSMD2)) %>% 
+    anova() %>% 
+    broom::tidy() 
+}) %>% filter(term == 'is_WRN') 
+
+ggplot(df, aes(guide, value, group = guide)) + ggbeeswarm::geom_beeswarm() +
+  geom_violin() + 
+  facet_wrap(~CL + day)+
+  theme(axis.text.x = element_text(angle = 80, hjust = 1))
+```
+
+
+# Sheet 7 (Fig ED 10a)
+
+Two-sample t-tests for comparing individual conditions.
+
+Two-way ANOVA for comparing to the two MLH1 guides
+
+```{r}
+ df <- readxl::read_xlsx('~/CPDS/WRN_manuscript/data/NatureDataSpreadsheet_190218_reformattedforstats.xlsx',
+                        sheet = 7) %>% 
+  reshape2::melt(variable.name = 'CL_guide') %>% 
+  dplyr::mutate(is_MLH1 = grepl('MLH', CL_guide))
+ 
+print(table(df$CL_guide))
+
+print('HCT116 vs HCT116 Ch2')
+with(df, t.test(value[CL_guide == 'HCT116 parental'],
+                value[CL_guide == 'HCT116 Ch2'])) %>% 
+  broom::tidy()
+
+print('HCT116 vs HCT116 Ch3+5')
+with(df, t.test(value[CL_guide == 'HCT116 parental'],
+                value[CL_guide == 'HCT116 Ch3+5'])) %>% 
+  broom::tidy()
+
+print('HCT116 Ch3+5 Ch2 vs (HCT116 Ch3+5 sgMLH1-1 AND HCT116 Ch3+5 sgMLH1-2)')
+with(df %>% filter(CL_guide == 'HCT116 Ch3+5 Ch2-2' | is_MLH1),
+     lm(value ~ is_MLH1 + CL_guide)) %>% 
+  anova() %>% 
+  broom::tidy()
+
+ggplot(df, aes(CL_guide, value, group = CL_guide)) + ggbeeswarm::geom_beeswarm() +
+  geom_violin() +
+  theme(axis.text.x = element_text(angle = 80, hjust = 1))
+```
+
+
+# Sheet 8 (Fig ED 10b)
+
+Two-way ANOVAs in each case
+
+```{r}
+ df <- readxl::read_xlsx('~/CPDS/WRN_manuscript/data/NatureDataSpreadsheet_190218_reformattedforstats.xlsx',
+                        sheet = 8) %>% 
+  reshape2::melt(variable.name = 'CL_guide') %>% 
+  tidyr::separate(CL_guide, into = c('CL', 'guide'), sep = ' ') %>% 
+  dplyr::mutate(is_WRN = grepl('WRN', guide),
+                is_MLH1 = grepl('MLH1', CL))
+ 
+print(table(df$CL, df$guide))
+
+cur_CL <- c('HCT116-Ch2+sgCh2-2', 'HCT116-Ch3+5+sgCh2-2')
+with(df %>% filter(CL %in% cur_CL),
+  lm(value ~ CL + guide)
+) %>% 
+  anova() %>% 
+  broom::tidy()
+
+cur_CL <- c('HCT116-Ch2+sgCh2-2', 'HCT116-Ch3+5+sgMLH1-1')
+with(df %>% filter(CL %in% cur_CL),
+  lm(value ~ CL + guide)
+) %>% 
+  anova() %>% 
+  broom::tidy()
+
+cur_CL <- c('HCT116-Ch2+sgCh2-2', 'HCT116-Ch3+5+sgMLH1-2')
+with(df %>% filter(CL %in% cur_CL),
+  lm(value ~ CL + guide)
+) %>% 
+  anova() %>% 
+  broom::tidy()
+
+
+print('As 3-way ANOVA')
+lm(value ~ 0 + is_MLH1 + CL + guide, df) %>% 
+  anova() %>% 
+  broom::tidy()
+
+ggplot(df, aes(CL, value, fill = guide)) + 
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 80, hjust = 1))
+```
+
+# Sheet 9 (Fig ED 10e)
+
+Two-way ANOVAs in each case
+
+```{r}
+ df <- readxl::read_xlsx('~/CPDS/WRN_manuscript/data/NatureDataSpreadsheet_190218_reformattedforstats.xlsx',
+                        sheet = 9) %>% 
+  reshape2::melt(variable.name = 'CL_guide') %>% 
+  tidyr::separate(CL_guide, into = c('CL', 'guide'), sep = ' ') %>% 
+  dplyr::mutate(is_WRN = grepl('WRN', guide),
+                is_MLH1 = grepl('MLH1', CL))
+ 
+print(table(df$CL, df$guide))
+
+cur_CL <- c('HCT116-Ch2+sgCh2-2', 'HCT116-Ch3+5+sgCh2-2')
+with(df %>% filter(CL %in% cur_CL),
+  lm(value ~ CL + guide)
+) %>% 
+  anova() %>% 
+  broom::tidy()
+
+cur_CL <- c('HCT116-Ch2+sgCh2-2', 'HCT116-Ch3+5+sgMLH1-1')
+with(df %>% filter(CL %in% cur_CL),
+  lm(value ~ CL + guide)
+) %>% 
+  anova() %>% 
+  broom::tidy()
+
+cur_CL <- c('HCT116-Ch2+sgCh2-2', 'HCT116-Ch3+5+sgMLH1-2')
+with(df %>% filter(CL %in% cur_CL),
+  lm(value ~ CL + guide)
+) %>% 
+  anova() %>% 
+  broom::tidy()
+
+print('As 3-way ANOVA')
+lm(value ~ 0 + is_MLH1 + CL + guide, df) %>% 
+  anova() %>% 
+  broom::tidy()
+
+ggplot(df, aes(CL, value, fill = guide)) + 
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 80, hjust = 1))
+```
+

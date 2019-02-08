@@ -1,0 +1,245 @@
+---
+title: "Intensity Stats"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(lsmeans)
+library(magrittr)
+library(plyr)
+library(tidyverse)
+library(reshape2)
+
+data_dir <- '~/CPDS/WRN_manuscript/data/intensity_data'
+```
+
+# Colon PP53
+
+```{r}
+df <- read_csv(file.path(data_dir, 'colon_pp53.csv')) %>% 
+  dplyr::rename(condition = `Cell Type`,
+                MSI_status = `MSS/MSI`,
+                intensity = intensity_pp53) %>% 
+  dplyr::mutate(condition = make.names(condition)) %>% 
+  tidyr::separate(col = condition, into = c('Cell_Line', 'Guide'), by = '_', remove = TRUE) %>% 
+  mutate(log_intensity = log10(intensity))
+
+#get rid of "mock" data
+df %<>% dplyr::filter(Guide != 'mock')
+df %<>% mutate(
+  guide_condition = ifelse(grepl('WRN', Guide), 'WRN', 'control')
+) 
+df %<>% mutate(sample = paste0(Cell_Line, '.', Guide))
+
+
+mod2 <- aov(log_intensity ~ sample, data = df)
+lmeans <- lsmeans::lsmeans(mod2, specs = c('sample'))
+cc <- contrast(lmeans, list(KM12_vs_SW620 = c(-1, 0.5, 0.5, 0, 0, 0, 1, -0.5, -0.5),
+                      SW48_vs_SW620 = c(0, 0, 0, -1, 0.5, 0.5, 1, -0.5, -0.5),
+                      KM12_SW48_vs_SW620 = c(-0.5, 0.25, 0.25, -0.5, 0.25, 0.25, 1, -0.5, -0.5),
+                      KM12 = c(-1, 0.5, 0.5, 0, 0, 0, 0, 0, 0),
+                      SW48 = c(0, 0, 0, -1, 0.5, 0.5, 0, 0, 0),
+                      SW620 = c(0, 0, 0, 0, 0, 0, -1, 0.5, 0.5)))
+print(cc)
+print(test(cc)$p.value)
+table(df$Guide, df$Cell_Line)
+
+ggplot(df, aes(x = Cell_Line, log_intensity, fill = Guide)) + 
+  geom_boxplot()
+
+dt <- df %>% group_by(Cell_Line, Guide, guide_condition, MSI_status) %>% 
+   summarise(avg = mean(log_intensity)) %>% 
+   group_by(guide_condition, Cell_Line) %>% 
+   summarise(avg = mean(avg)) %>% 
+   dcast(Cell_Line ~ guide_condition) %>% 
+   dplyr::mutate(diff = WRN - control)
+```
+
+# Colon P21
+
+```{r}
+df <- read_csv(file.path(data_dir, 'colon_p21.csv')) %>% 
+  dplyr::rename(condition = `cell-guide`,
+                MSI_status = `MSS/MSI`) %>% 
+  dplyr::mutate(condition = make.names(condition)) %>% 
+  tidyr::separate(col = condition, into = c('Cell_Line', 'Guide'), by = '_', remove = TRUE) %>% 
+  mutate(log_intensity = log10(intensity))
+
+df %<>% mutate(
+  guide_condition = ifelse(grepl('WRN', Guide), 'WRN', 'control')
+) 
+df %<>% mutate(sample = paste0(Cell_Line, '.', Guide))
+
+mod2 <- aov(log_intensity ~ sample, data = df)
+lmeans <- lsmeans::lsmeans(mod2, specs = c('sample'))
+cc <- contrast(lmeans, list(KM12_vs_SW620 = c(-1, 0.5, 0.5, 0, 0, 0, 1, -0.5, -0.5),
+                      SW48_vs_SW620 = c(0, 0, 0, -1, 0.5, 0.5, 1, -0.5, -0.5),
+                      SW48_vs_KM12 = c(1, -0.5, -0.5, -1, 0.5, 0.5, 0, 0, 0),
+                      KM12 = c(-1, 0.5, 0.5, 0, 0, 0, 0, 0, 0),
+                      SW48 = c(0, 0, 0, -1, 0.5, 0.5, 0, 0, 0),
+                      SW620 = c(0, 0, 0, 0, 0, 0, -1, 0.5, 0.5)))
+print(cc)
+print(test(cc)$p.value)
+
+ggplot(df, aes(x = Cell_Line, log_intensity, fill = Guide)) + 
+  geom_violin()
+
+dt <- df %>% group_by(Cell_Line, Guide, guide_condition, MSI_status) %>% 
+   summarise(avg = mean(log_intensity)) %>% 
+   group_by(guide_condition, Cell_Line) %>% 
+   summarise(avg = mean(avg)) %>% 
+   dcast(Cell_Line ~ guide_condition) %>% 
+   dplyr::mutate(diff = WRN - control)
+
+```
+
+
+# Ovarian PP53
+
+```{r}
+df <- read_csv(file.path(data_dir, 'ovarian_pp53.csv')) %>% 
+  dplyr::rename(condition = `cell/guide`,
+                MSI_status = `MSS/MSI`) %>% 
+  dplyr::mutate(condition = make.names(condition)) %>% 
+  tidyr::separate(col = condition, into = c('Cell_Line', 'Guide'), by = '_', remove = TRUE) %>% 
+  mutate(log_intensity = log10(intensity))
+
+df %<>% mutate(
+  guide_condition = ifelse(grepl('WRN', Guide), 'WRN', 'control')
+) 
+df %<>% mutate(sample = paste0(Cell_Line, '.', Guide))
+
+mod2 <- aov(log_intensity ~ sample, data = df)
+lmeans <- lsmeans::lsmeans(mod2, specs = c('sample'))
+cc <- contrast(lmeans, list(OVK18_vs_ES2 = c(1, -0.5, -0.5, -1, 0.5, 0.5),
+                            OVK18 = c(0,0,0, -1, 0.5, 0.5),
+                            ES2 = c(-1, 0.5, 0.5, 0, 0, 0)))
+print(cc)
+print(test(cc)$p.value)
+
+ggplot(df, aes(x = Cell_Line, log_intensity, fill = Guide)) + 
+  geom_violin(alpha = 0.75) 
+
+dt <- df %>% group_by(Cell_Line, Guide, guide_condition, MSI_status) %>% 
+   summarise(avg = mean(log_intensity)) %>% 
+   group_by(guide_condition, Cell_Line) %>% 
+   summarise(avg = mean(avg)) %>% 
+   dcast(Cell_Line ~ guide_condition) %>% 
+   dplyr::mutate(diff = WRN - control)
+
+```
+
+# Ovarian P21
+
+```{r}
+df <- read_csv(file.path(data_dir, 'ovarian_p21_190206.csv')) %>%
+  dplyr::rename(condition = `cell-guide`,
+                MSI_status = `MSS/MSI`) %>% 
+  dplyr::mutate(condition = make.names(condition)) %>% 
+  tidyr::separate(col = condition, into = c('Cell_Line', 'Guide'), by = '_', remove = TRUE) %>% 
+  mutate(log_intensity = log10(intensity))
+
+df %<>% mutate(
+  guide_condition = ifelse(grepl('WRN', Guide), 'WRN', 'control')
+) 
+df %<>% mutate(sample = paste0(Cell_Line, '.', Guide))
+
+mod2 <- aov(log_intensity ~ sample, data = df)
+lmeans <- lsmeans::lsmeans(mod2, specs = c('sample'))
+cc <- contrast(lmeans, list(OVK18_vs_ES2 = c(1, -0.5, -0.5, -1, 0.5, 0.5),
+                            OVK18 = c(0,0,0, -1, 0.5, 0.5),
+                            ES2 = c(-1, 0.5, 0.5, 0, 0, 0)))
+print(cc)
+print(test(cc)$p.value)
+
+ggplot(df, aes(x = Cell_Line, log_intensity, fill = Guide)) + 
+  geom_violin(alpha = 0.75)
+
+dt <- df %>% group_by(Cell_Line, Guide, guide_condition, MSI_status) %>% 
+   summarise(avg = mean(log_intensity)) %>% 
+   group_by(guide_condition, Cell_Line) %>% 
+   summarise(avg = mean(avg)) %>% 
+   dcast(Cell_Line ~ guide_condition) %>% 
+   dplyr::mutate(diff = WRN - control)
+
+```
+
+
+
+# Colon gH2AX
+
+```{r}
+df <- read_csv(file.path(data_dir, 'colon_gH2AX.csv')) %>% 
+  dplyr::rename(condition = `cell-guide`,
+                MSI_status = `MSS/MSI`) %>% 
+  dplyr::mutate(condition = make.names(condition)) %>% 
+  tidyr::separate(col = condition, into = c('Cell_Line', 'Guide'), by = '_', remove = TRUE) %>% 
+  mutate(log_intensity = log10(intensity))
+
+df %<>% mutate(
+  guide_condition = ifelse(grepl('WRN', Guide), 'WRN', 'control')
+) 
+df %<>% mutate(sample = paste0(Cell_Line, '.', Guide))
+table(df$Guide, df$Cell_Line)
+
+mod2 <- aov(log_intensity ~ sample, data = df)
+lmeans <- lsmeans::lsmeans(mod2, specs = c('sample'))
+cc <- contrast(lmeans, list(KM12_vs_SW620 = c(-1, 0.5, 0.5, 0, 0, 0, 1, -0.5, -0.5),
+                      SW48_vs_SW620 = c(0, 0, 0, -1, 0.5, 0.5, 1, -0.5, -0.5),
+                      KM12_SW48_vs_SW620 = c(-0.5, 0.25, 0.25, -0.5, 0.25, 0.25, 1, -0.5, -0.5),
+                      KM12 = c(-1, 0.5, 0.5, 0, 0, 0, 0, 0, 0),
+                      SW48 = c(0, 0, 0, -1, 0.5, 0.5, 0, 0, 0),
+                      SW620 = c(0, 0, 0, 0, 0, 0, -1, 0.5, 0.5)))
+print(cc)
+print(test(cc)$p.value)
+
+ggplot(df, aes(x = Cell_Line, log_intensity, fill = Guide)) + 
+  geom_violin(alpha = 0.75) +
+  geom_boxplot()
+
+dt <- df %>% group_by(Cell_Line, Guide, guide_condition, MSI_status) %>% 
+   summarise(avg = mean(log_intensity)) %>% 
+   group_by(guide_condition, Cell_Line) %>% 
+   summarise(avg = mean(avg)) %>% 
+   dcast(Cell_Line ~ guide_condition) %>% 
+   dplyr::mutate(diff = WRN - control)
+
+```
+
+# Ovarian gH2AX
+
+```{r}
+df <- read_csv(file.path(data_dir, 'ovarian_gH2AX_190206.csv')) %>% 
+  dplyr::rename(condition = `cell-guide`,
+                MSI_status = `MSS/MSI`) %>% 
+  dplyr::mutate(condition = make.names(condition)) %>% 
+  tidyr::separate(col = condition, into = c('Cell_Line', 'Guide'), by = '_', remove = TRUE) %>% 
+  mutate(log_intensity = log10(intensity))
+
+df %<>% mutate(
+  guide_condition = ifelse(grepl('WRN', Guide), 'WRN', 'control')
+) 
+df %<>% mutate(sample = paste0(Cell_Line, '.', Guide))
+
+mod2 <- aov(log_intensity ~ sample, data = df)
+lmeans <- lsmeans::lsmeans(mod2, specs = c('sample'))
+cc <- contrast(lmeans, list(OVK18_vs_ES2 = c(1, -0.5, -0.5, -1, 0.5, 0.5),
+                            OVK18 = c(0,0,0, -1, 0.5, 0.5),
+                            ES2 = c(-1, 0.5, 0.5, 0, 0, 0)))
+print(cc)
+print(test(cc)$p.value)
+
+ggplot(df, aes(x = Cell_Line, log_intensity, fill = Guide)) + 
+  geom_violin() +
+  geom_boxplot()
+
+dt <- df %>% group_by(Cell_Line, Guide, guide_condition, MSI_status) %>% 
+   summarise(avg = mean(log_intensity)) %>% 
+   group_by(guide_condition, Cell_Line) %>% 
+   summarise(avg = mean(avg)) %>% 
+   dcast(Cell_Line ~ guide_condition) %>% 
+   dplyr::mutate(diff = WRN - control)
+
+```
