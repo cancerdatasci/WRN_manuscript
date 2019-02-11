@@ -10,6 +10,8 @@ df <- read_csv('~/CPDS/WRN_manuscript/data/KM12_in_vivo_combined.csv') %>%
 used_samples <- df %>% group_by(Mouse) %>% summarise(n = sum(!is.na(Volume))) %>% filter(n >= 5) %>% .[['Mouse']]
 df %<>% filter(Mouse %in% used_samples)
 
+df %>% group_by(Tumor, Day, Dox) %>% summarise(n = sum(!is.na(Volume)))
+
 all_slopes <- ddply(df, .(Mouse, Tumor, Dox), function(aa) {
   lm(Volume ~ Day, aa) %>% 
     broom::tidy()

@@ -1,0 +1,307 @@
+---
+title: "WRN RNAseq"
+output:
+    html_document:
+    toc: true
+toc_float: true
+editor_options: 
+    chunk_output_type: console
+---
+    
+    ```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE)
+library(plyr); 
+library(tidyverse)
+library(magrittr); 
+library(ggrepel)
+library(edgeR)
+library(limma)
+library(DT)
+library(cdsr)
+library(GSEABase)
+library(RColorBrewer)
+library(pheatmap)
+library(cowplot)
+
+source('~/CPDS/WRN_manuscript/src/WRN_helpers.R')    
+    
+data_dir <- '~/CPDS/WRN_manuscript/data/RNAseq'
+fig_dir <- '~/CPDS/WRN_manuscript/figures'
+
+q_thresh <- 0.1
+min_cpm <- 1 #minimum counts per million to consider gene expressed
+min_group_size_frac <- 1/2 #minimum fraction of samples where gene is expressed to include it in DE analysis
+
+save_as <- 'pdf'
+
+#list of MSigDB collections as GeneSetCollection objects
+full_gsc <- read_rds('~/CPDS/data/MSigDB/gsc_data.rds')
+```
+
+# Load Data
+
+```{r, include = FALSE}
+sample_info <- read.csv(file.path(data_dir, 'WRN_design_mat.csv'), stringsAsFactors = F, check.names = F)
+sample_info %<>% mutate(
+    MS_status = factor(MS_status, levels = c('MSS', 'MSI')),
+    target = factor(target, levels = c('Chr2', 'WRN'))
+)
+counts_mat <- read.csv(file.path(data_dir, 'STAR_gene_counts.csv'), stringsAsFactors = F, check.names = F) %>%
+    column_to_rownames(var = 'Gene_ID')
+dge <- DGEList(counts_mat)
+
+sample_info %<>% dplyr::filter(Cell_line %in% c('OVK18', 'SW48'))
+dge <- dge[, sample_info$Sample]
+
+#make sure the cond_table and counts_mat are properly aligned
+stopifnot(all.equal(sample_info$Sample, colnames(dge))) 
+```
+
+Identify usable genes, and scale data and logCPM normalize
+
+```{r}
+min_cpm <- 1
+min_group_size <- ncol(dge)*min_group_size_frac
+
+lib_sizes <- colSums(counts_mat)
+paste0('Max fold diff lib size = ', 10 ^ diff(range(log10(lib_sizes))))
+CPM <- cpm(dge)
+keep <- rowSums(CPM > min_cpm) >= min_group_size
+paste0(nrow(dge), ' total transcripts. Keeping ', sum(keep), ' transcripts after filtering')
+dge <- dge[keep,]
+dge <- edgeR::calcNormFactors(dge, method = 'TMM') #scale normalization using TMM
+logCPM <- cpm(dge, log=TRUE)
+```
+
+# QC checks
+
+## Heirarchical clustering
+
+Heirarchical clustering based on expression profile Spearman correlations. This shows that the data are overall high quality (no outliers), with good grouping of samples within-cell lines. The biggest difference is clearly between colon and ovarian cell lines.
+
+```{r, fig.height=8, fig.width=8}
+# sampleDists <- as.matrix(dist(t(logCPM)))
+sampleDists <- as.matrix(cor(logCPM, method = 'spearman'))
+vector <- sample_info$target_id
+mycols <- brewer.pal(8, "Dark2")[1:length(unique(vector))]
+pheatmap(sampleDists)
+```
+
+## Multi-dimensional scaling
+
+Similar samples should group together. Looks good
+
+```{r, fig.height=7, fig.width=6}
+plotMDS(logCPM)
+```
+
+## PCA 
+
+Again, looks good
+
+```{r, fig.height=7, fig.width=6}
+pc <- prcomp(t(logCPM))
+plot(pc$x[, 1:2], pch = 19, cex=1)
+text(pc$x[, 1:2], labels = colnames(logCPM), pos = 3)
+
+```
+
+## lCPM distributions
+
+Comparing distribution of log-counts per million per sample looks reasonable
+
+```{r, fig.height=7, fig.width=6}
+nsamples <- ncol(dge)
+col <- brewer.pal(nsamples, "Paired")
+
+plot(density(logCPM[,1]), col=col[1], lwd=2, ylim=c(0,0.21), las=2,
+ main="", xlab="")
+title(main="B. Filtered data", xlab="Log-cpm")
+abline(v=0, lty=3)
+for (i in 2:nsamples){
+ den <- density(logCPM[,i])
+ lines(den$x, den$y, col=col[i], lwd=2)
+}
+```
+
+Make design matrix
+
+```{r}
+Treat <- factor(paste0(sample_info$target, '_', sample_info$Cell_line))
+design <- model.matrix(~0 + Treat, data = sample_info)
+colnames(design) <- levels(Treat)
+```
+
+## Comparing WRN expression levels
+
+```{r}
+df <- data.frame(WRN_GE = logCPM['WRN',], sample_name = colnames(logCPM)) %>% 
+  mutate(CL = str_match(sample_name, '^(.+)_')[,2],
+         guide = tolower(str_match(sample_name, '_(.+)[AB]')[,2]),
+         condition = ifelse(grepl('WRN', sample_name), 'WRN', 'Chr2')) %>% 
+  group_by(CL, guide) %>% 
+  summarise(avg_WRN_GE = mean(WRN_GE, na.rm=T))
+ggplot(df, aes(CL, avg_WRN_GE, fill = guide)) + 
+  geom_bar(stat = 'identity', position = 'dodge') +
+  ylab('WRN expression (avg log CPM)') + 
+  xlab('') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+# Per-cell-line diff expression analysis
+
+First I fit a model comparing WRN KD to cutting control for each sample.
+
+```{r}
+cm <- makeContrasts(
+        OVK18 = WRN_OVK18 - Chr2_OVK18,
+        SW48 = WRN_SW48 - Chr2_SW48,   
+        levels = design
+    )
+v <- voom(dge, design, plot=TRUE)
+fit <- lmFit(v, design)
+fit2 <- contrasts.fit(fit, cm)
+fit2 <- eBayes(fit2)
+```
+
+```{r}
+#Extract stats tables for each contrast
+all_res <- ldply(colnames(cm), function(cur_cont) {
+    topTable(fit2, coef = cur_cont, number = Inf) %>% 
+        rownames_to_column(var = 'Gene') %>% 
+        mutate(contrast = cur_cont)
+})
+LFC_mats <- all_res %>% 
+    dplyr::select(Gene, logFC, contrast) %>% 
+    reshape2::acast(Gene ~ contrast, value.var = 'logFC')
+```
+
+
+## WRN KD levels comparison
+
+```{r}
+to_plot <- all_res %>% filter(Gene == 'WRN') %>% mutate(lineage = ifelse(contrast %in% c('OVK18', 'ES2'), 'ovarian', 'colon'))
+ggplot(to_plot, aes(logFC, -log10(P.Value), color = lineage)) + 
+  geom_point(alpha = 1, size = 3) + 
+  geom_text_repel(aes(label = contrast), size = 3) + 
+  geom_vline(xintercept = 0, linetype = 'dashed') +
+  geom_hline(yintercept = -log10(0.05), linetype = 'dashed')
+```
+
+## WRN KD DE per cell line
+
+WRN is indicated by the large green dot
+
+```{r, fig.width=8, fig.height=6}
+make_volcano <- function(cur_contr) {
+to_plot <- filter(all_res, contrast == cur_contr)
+ggplot(to_plot,
+       aes(logFC, -log10(P.Value), color = adj.P.Val < q_thresh)) + 
+  geom_point(alpha = 0.5, size = 0.75) + 
+  geom_point(data = filter(to_plot, Gene == 'WRN'), color = 'darkgreen', alpha = 1, size = 3) + 
+  geom_text_repel(data = to_plot %>% arrange(desc(abs(logFC))) %>% head(30), aes(label = Gene)) +
+  geom_vline(xintercept = 0, linetype = 'dashed') + 
+  ggtitle(cur_contr) +
+  scale_color_manual(values = c(`FALSE` = 'black', `TRUE` = 'red'))
+}
+
+make_volcano('OVK18')
+make_volcano('SW48')
+```
+
+## GSEA analysis
+
+```{r}
+gsc_name <- 'hallmark'
+highlight_pathways <- c('P53_PATHWAY', 'E2F_TARGETS', 'G2M_CHECKPOINT', 'APOPTOSIS')
+col_scheme = c(other = 'black', 
+               P53_PATHWAY = "#386cb0",
+               E2F_TARGETS = "#fdb462",
+               G2M_CHECKPOINT = "#7fc97f",
+               APOPTOSIS = 'red')
+run_gsea_analysis <- function(cur_contr, nperm = 1e5) {
+  LFC_vals <- filter(all_res, contrast == cur_contr, Gene != 'WRN')
+  # LFC_vals <- LFC_vals$logFC %>% set_names(LFC_vals$Gene)
+  LFC_vals <- LFC_vals$t %>% set_names(LFC_vals$Gene)
+  fgsea_res <- cdsr::run_fGSEA(full_gsc[[gsc_name]], gene_stat = LFC_vals, perm_type = 'gene', nperm = nperm, nproc = 6) %>% 
+    arrange(pval)
+  
+  fgsea_res %<>% mutate(pathway = str_replace(pathway, 'HALLMARK_', ''),
+                        pathway_ann = ifelse(pathway %in% highlight_pathways, pathway, 'other'))
+  
+  g <- ggplot(fgsea_res, aes(NES, -log10(pval), color = pathway_ann)) + 
+    # geom_jitter(alpha = 0.75, width = 0.05, height = 0.05, size = 2) + 
+    geom_point(alpha = 0.6, size = 1.5) + 
+    geom_text_repel(data = fgsea_res %>% arrange(desc(abs(NES))) %>% head(10), aes(label = pathway), size = 1.5) +
+    ggtitle(cur_contr) +
+    scale_color_manual(values = col_scheme) +
+    guides(color = guide_legend(title = element_blank(), nrow = 2)) +
+    theme_Publication()
+  
+  return(list(dat = fgsea_res, fig = g))
+}
+```
+
+```{r}
+nperm <- 1e6
+set.seed(1)
+SW48_GSEA <- run_gsea_analysis('SW48', nperm = nperm)
+OVK18_GSEA <- run_gsea_analysis('OVK18', nperm = nperm)
+
+SW48_GSEA$fig
+save_fig(fig_dir, 'SW48_GSEA_volcano', width = 4, height = 4, save_as)
+
+OVK18_GSEA$fig
+save_fig(fig_dir, 'OVK18_GSEA_volcano', width = 4, height = 4, save_as)
+
+comb <- full_join(SW48_GSEA$dat, OVK18_GSEA$dat, by = 'pathway', suffix = c('_SW48', '_OVK18'))
+comb %<>% mutate(pathway_ann = ifelse(pathway %in% highlight_pathways, pathway, 'other'),
+                 avg_sig = -log10(pval_OVK18) - log10(pval_SW48))
+ggplot(comb, aes(NES_OVK18, NES_SW48, color = pathway_ann)) + 
+  geom_point(aes(size = avg_sig), alpha = 0.6) + 
+  geom_abline(linetype = 'dashed') +
+  # geom_label_repel(data = comb %>% arrange(desc(abs(NES_OVK18 + NES_SW48))) %>% 
+  #                   head(10), aes(label = pathway), 
+  #                 size = 2,
+  #                 label.size = 0.1, 
+  #                 fontface = 'bold',
+  #                 label.padding = 0.1) +
+  scale_color_manual(values = col_scheme) +
+  scale_size(range = c(2, 8)) +
+  guides(color = guide_legend(title = element_blank(), nrow = 4),
+         size = guide_legend(title = 'Avg. -log10(pval)', nrow=3)) +
+  theme_Publication() +
+  geom_hline(yintercept = 0, linetype = 'dashed') +
+  geom_vline(xintercept = 0, linetype = 'dashed') +
+  theme(legend.key.height = unit(0.4, 'cm')) +
+  xlab('Normalized enrichment score OVK18') + 
+  ylab('Normalized enrichment score SW48')
+save_fig(fig_dir, 'SW48_OVK18_GSEA_scatter', width = 5, height = 5.5, save_as)
+
+```
+
+
+```{r}
+plot_list <- c('HALLMARK_G2M_CHECKPOINT', 'HALLMARK_P53_PATHWAY', 'HALLMARK_E2F_TARGETS')
+for (to_plot in plot_list) {
+  cur_contr <- 'SW48'
+  LFC_vals <- filter(all_res, contrast == cur_contr, Gene != 'WRN')
+  LFC_vals <- LFC_vals$t %>% set_names(LFC_vals$Gene)
+  g1 <- plotEnrichment_mod(geneIds(full_gsc[[gsc_name]][[to_plot]]), LFC_vals, gseaParam = 1)
+  g1l <- layer_scales(g1)$y$range$range
+  
+  cur_contr <- 'OVK18'
+  LFC_vals <- filter(all_res, contrast == cur_contr, Gene != 'WRN')
+  LFC_vals <- LFC_vals$t %>% set_names(LFC_vals$Gene)
+  g2 <- plotEnrichment_mod(geneIds(full_gsc[[gsc_name]][[to_plot]]), LFC_vals, gseaParam = 1)
+  g2l <- layer_scales(g2)$y$range$range
+  lims <- c(min(c(g1l, g2l)), max(c(g1l, g2l)))
+  
+  plot_grid(g1 + ylim(lims) + ggtitle('SW48'), 
+            g2 + ylim(lims) + ggtitle('OVK18'))
+  save_fig(fig_dir, paste0('GSEA_enrich_', to_plot), width = 8, height = 4, save_as)
+}
+
+```
+
