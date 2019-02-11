@@ -16,6 +16,8 @@ Most of the files needed to run the analysis scripts here can be downloaded from
 
 * **generate_figs.Rmd**: This script generates all figures analyzing the CCLE/Achilles/GDSC data. It takes as input the cell line table mentioned above, and also takes as input a set of cell line feature matrices from DepMap 18Q4 data release. In the analysis script these are pulled from our internal data server into a data list object "**dat**". For convenience, we also provide this list saved as an rds file on the Figshare repo.
 
+* **WRN_diff_express.Rmd**: This script runs differenital expression analyses on the RNAseq data and generates figures.
+
 * **in_vivo_KM12_analysis.R**: Short script to run linear mixed model analysis on in vivo xenograft data.
 
 * **intensity_calcs.Rmd**: Runs linear model contrast tests on IF intensity values across cells.
