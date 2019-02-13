@@ -24,6 +24,7 @@ library(cowplot)
 source('~/CPDS/WRN_manuscript/src/WRN_helpers.R')
 
 fig_dir <- '~/CPDS/WRN_manuscript/figures'
+data_dir <- '~/CPDS/WRN_manuscript/data'
 
 #PARAMETERS 
 q_thresh <- 0.1
@@ -45,9 +46,11 @@ RECQ_helicases <- c('WRN', 'RECQL', 'BLM', 'RECQL4', 'RECQL5')
 # Load omics data and sample_info
 
 ```{r, include = FALSE}
-dat <- load_omics_data()
+# dat <- load_omics_data()
+dat <- read_rds(file.path(data_dir, 'DepMap_18Q4_data.rds'))
 
-comb_data <- read_csv('~/CPDS/WRN_manuscript/data/WRN_final_cell_line_table.csv')
+comb_data <- read_csv(file.path(data_dir, 'Supplementary Table 1.csv'))
+
 comb_data %<>% mutate(MSI = ifelse(CCLE_MSI == 'indeterminate', NA, CCLE_MSI),
                       MSI = MSI == 'MSI',
                       CCLE_MSI = factor(CCLE_MSI, levels = c('MSS', 'indeterminate', 'MSI')))
