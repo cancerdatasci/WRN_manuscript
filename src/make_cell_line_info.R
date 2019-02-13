@@ -22,7 +22,7 @@ common_MSI_lineages <- c('gastric', 'colorectal', 'endometrium', 'ovary')
 MMR_genes <- c('MLH1', 'MSH2', 'MSH6', 'PMS2')
 
 dat <- load_omics_data()
-# write_rds(dat, file.path(results_dir, 'cell_line_data_mats.rds')) #WRITE OUT OMICS DAT FILE
+# write_rds(dat, file.path(data_dir, 'DepMap_18Q4_data.rds')) #WRITE OUT OMICS DAT FILE
 
 sample_info <- load.from.taiga(data.name = 'master-cell-line-export-0306', data.version = '196') %>%
   dplyr::select(CCLE_ID = CCLE_name, lineage = Disease, secondary_tissue = `Disease Subtype`) %>%
