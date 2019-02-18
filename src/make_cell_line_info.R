@@ -181,5 +181,5 @@ comb_data %>%
                 POLE_damaging_mut,
                 POLE_other_mut,
                 POLE_hotspot_mut,
-                other_MMR_mut
+                any_MMR_mut
   ) %>% write_csv(file.path(data_dir, 'WRN_final_cell_line_table.csv'))
