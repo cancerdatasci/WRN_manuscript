@@ -222,7 +222,7 @@ make_volcano <- function(df, n_labs = 15) {
                      fontface = 'bold',
                      label.padding = 0.1) +    
     xlab('MSI-MSS mean difference') +
-    ylab('-log10(q-value)') +
+    ylab('-log10(p-value)') +
     theme_Publication(14) 
 }
 
